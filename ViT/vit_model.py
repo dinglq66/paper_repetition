@@ -28,10 +28,9 @@ class DropPath(nn.Module):
     """
     随机深度网络对应的类，实例属性包括drop_prob和training，前者用于表示随机丢弃的概率，后者用于表示是否为训练阶段
     """
-    def __init__(self, drop_prob=0., training=False):
+    def __init__(self, drop_prob=0.):
         super(DropPath, self).__init__()
         self.drop_prob = drop_prob
-        self.training = training
 
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
@@ -120,6 +119,190 @@ class MLP(nn.Module):
     """
     全连接层，和多头注意力模块共同组成基本Block
     """
-    def __init__(self):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
-        
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class Block(nn.Module):
+    """
+    Transformer网络中的基础模块，包含多头注意力机制和FFN部分
+    """
+    def __init__(self,
+                 dim,
+                 num_heads,
+                 mlp_ratio,
+                 qkv_bias=False,
+                 qk_scale=None,
+                 drop_ratio=0.,
+                 attn_drop_ratio=0.,
+                 drop_path_ratio=0.,
+                 act_layer=nn.GELU,
+                 norm_layer=nn.LayerNorm):
+        super(Block, self).__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                              attn_drop_ratio=attn_drop_ratio, proj_drop_ratio=drop_ratio)
+        self.drop_path = DropPath(drop_prob=drop_path_ratio) if drop_path_ratio > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop_ratio)
+
+    def forward(self, x):
+        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class VisionTransformer(nn.Module):
+    """
+    ViT模型的整体类实现
+    """
+    def __init__(self, img_size=224, patch_size=16, in_c=3, num_classes=1000,
+                 embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.0, qkv_bias=True,
+                 qk_scale=None, representation_size=None, distilled=False, drop_ratio=0.,
+                 attn_drop_ratio=0., drop_path_ratio=0., embed_layer=PatchEmbed, norm_layer=None, act_layer=None):
+        """
+        Args:
+            img_size (int, tuple): 输入图像尺寸
+            patch_size (int tuple): 子块尺寸
+            in_c (int): 输入图像的维度，彩色图像则为3
+            num_classes (int): 分类头的类别数目
+            embed_dim (int): 嵌入层的维度
+            depth (int): transformer的深度，体现为所用Block的个数
+            num_heads (int): 注意力头的个数
+            mlp_ratio (int): MLP网络中隐藏层相比于嵌入维度的倍数
+            qkv_bias (bool): 若为True，则qkv带有bias
+            qk_scale (float): 如果指定的话，则取代默认值为 head_dim**-0.5
+            representation_size (Optional[int]): 如果设置的话则启动表征层，并将pre-logits设置为该值
+            distilled (bool): 如果设置的话，模型会像DeiT模型一样包含一个distillation token和头部
+            drop_ratio (float): MLP网络的随机丢弃概率
+            attn_drop_ratio (float): 多头注意力机制中的随机丢弃概率
+            drop_path_ratio (float): 随机深度策略值
+            embed_layer (nn.Module): patch embedding层
+            norm_layer (nn.Module): 正则化层
+        """
+        super(VisionTransformer, self).__init__()
+        self.num_classes = num_classes
+        self.num_features = self.embed_dim = embed_dim
+        self.num_tokens = 2 if distilled else 1
+        norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
+        act_layer = act_layer or nn.GELU
+
+        self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_c=in_c, embed_dim=embed_dim)
+        num_patches = self.patch_embed.num_patches
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.dist_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if distilled else None
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        self.pos_drop = nn.Dropout(p=drop_ratio)
+
+        dpr = [x.item() for x in torch.linspace(0, drop_path_ratio, depth)]  # 随机深度衰减
+        self.blocks = nn.Sequential(*[
+            Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                  drop_ratio=drop_ratio, attn_drop_ratio=attn_drop_ratio, drop_path_ratio=dpr[i],
+                  norm_layer=norm_layer, act_layer=act_layer)
+            for i in range(depth)
+        ])
+        self.norm = norm_layer(embed_dim)
+
+        # 表征层
+        if representation_size and not distilled:
+            self.has_logits = True
+            self.num_features = representation_size
+            self.pre_logits = nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(embed_dim, representation_size)),
+                ("act", nn.Tanh())
+            ]))
+        else:
+            self.has_logits = False
+            self.pre_logits = nn.Identity()
+
+        # 分类头
+        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
+        self.head_dist = None
+
+        if distilled:
+            self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
+
+        # 权重初始化
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        if self.dist_token is not None:
+            nn.init.trunc_normal_(self.dist_token, std=0.02)
+
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        self.apply(_init_vit_weights)
+
+    def forward_features(self, x):
+        # [B, N, H, W] --> [B, num_patches, embed_dim]
+        x = self.patch_embed(x)  # [B, 196, 768]
+        # [1, 1, 768] --> [B, 1, 768]
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1)
+        if self.dist_token is None:
+            x = torch.cat((cls_token, x), dim=1)  # [B, 196+1, 768]
+        else:
+            x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
+
+        x = self.pos_drop(x + self.pos_embed)
+        x = self.blocks(x)
+        x = self.norm(x)
+        if self.dist_token is None:
+            return self.pre_logits(x[:, 0])
+        else:
+            return x[:, 0], x[:, 1]
+
+    def forward(self, x):
+        x = self.forward_features(x)
+        if self.head_dist is not None:
+            x, x_dist = self.head(x[0]), self.head_dist(x[1])
+            if self.training and not torch.jit.is_scripting():  # 在推理阶段返回两个分类器预测值的均值
+                return x, x_dist
+            else:
+                return (x + x_dist) / 2
+        else:
+            x = self.head(x)
+        return x
+
+
+def _init_vit_weights(m):
+    """
+    ViT模型权重初始化
+    :param m: module
+    """
+    if isinstance(m, nn.Linear):
+        nn.init.trunc_normal_(m.weight, std=0.01)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode="fan_out")
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.LayerNorm):
+        nn.init.zeros_(m.bias)
+        nn.init.ones_(m.weight)
+
+
+def vit_base_patch16_224_in21k(num_classes: int = 21843, has_logits: bool = True):
+    """
+    ViT-Base模型，对应原论文中的(ViT-B/32)
+    """
+    model = VisionTransformer(img_size=224,
+                              patch_size=32,
+                              embed_dim=768,
+                              depth=12,
+                              num_heads=12,
+                              representation_size=768 if has_logits else None,
+                              num_classes=num_classes)
+    return model
