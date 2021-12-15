@@ -299,7 +299,7 @@ def vit_base_patch16_224_in21k(num_classes: int = 21843, has_logits: bool = True
     ViT-Base模型，对应原论文中的(ViT-B/32)
     """
     model = VisionTransformer(img_size=224,
-                              patch_size=32,
+                              patch_size=16,
                               embed_dim=768,
                               depth=12,
                               num_heads=12,

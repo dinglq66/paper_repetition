@@ -1,5 +1,6 @@
 import os
 import json
+import time
 
 import torch
 from PIL import Image
@@ -37,22 +38,27 @@ def main():
     # 定义模型实例
     model = create_model(num_classes=5, has_logits=False).to(device)
     # 加载模型权重
-    model_weight_path = "./weights/jx_vit_base_patch16_224_in21k-e5005f0a.pth"
+    # model_weight_path = "./weights/jx_vit_base_patch16_224_in21k-e5005f0a.pth"
+    model_weight_path = "./weights/model-9.pth"
     model.load_state_dict(torch.load(model_weight_path, map_location=device))
     model.eval()
+    start_time = time.time()
     with torch.no_grad():
         # 预测类别
         output = torch.squeeze(model(img.to(device))).cpu()
         predict = torch.softmax(output, dim=0)
         predict_cla = torch.argmax(predict).numpy()
 
+    end_time = time.time()
     print_res = "class:{} prob:{:.3}".format(class_indict[str(predict_cla)],
                                              predict[predict_cla].numpy())
     plt.title(print_res)
     for i in range(len(predict)):
-        print("class:{} prob:{:.3}".format(class_indict[str[i]],
+        print("class:{} prob:{:.3}".format(class_indict[str(i)],
                                            predict[i].numpy()))
     plt.show()
+    print('total time:{}'.format(end_time-start_time))
+
 
 if __name__ == '__main__':
     main()
