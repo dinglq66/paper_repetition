@@ -159,7 +159,7 @@ class MLP(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
+        self.act = act_layer
         self.drop1 = nn.Dropout(drop)
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop2 = nn.Dropout(drop)
@@ -202,8 +202,8 @@ class WindowAttention(nn.Module):
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
         # indexing="ij": 按照ij坐标系建立网格，其中纵向表示i轴，横向表示j轴
-        # 若不指定indexing参数，建立的网格坐标系为笛卡尔坐标系，纵向表示y轴，横向表示x轴
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing="ij"))  # [2, Mh, Mw]
+        # 若不指定indexing参数，建立的网格坐标系为笛卡尔坐标系，纵向表示y轴，横向表示x轴 -- 对于torch 1.7版本的需要指定indexing='ij'
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # [2, Mh, Mw]
         coords_flatten = torch.flatten(coords, 1)  # [2, Mh*Mw]
 
         # [2, Mh*Mw, 1] - [2, 1, Mh*Mw]
@@ -287,7 +287,7 @@ class SwinTransformerBlock(nn.Module):
         )
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.nrom2 = norm_layer(dim)
+        self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
@@ -418,7 +418,7 @@ class BasicLayer(nn.Module):
         if self.downsample is not None:
             x = self.downsample(x, H, W)
             H, W = (H + 1) // 2, (W + 1) // 2
-            return x, H, W
+        return x, H, W
 
 
 class SwinTransformer(nn.Module):
