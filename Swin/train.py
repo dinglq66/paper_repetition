@@ -81,7 +81,10 @@ def main(args):
                 print('training {}'.format(name))
 
     pg = [p for p in model.parameters() if p.requires_grad]
-    optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=5e-5)
+    # optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=5e-5)
+    optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5e-5)
+    lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
     for epoch in range(args.epochs):
         # train
@@ -90,6 +93,7 @@ def main(args):
                                                 data_loader=train_loader,
                                                 device=device,
                                                 epoch=epoch)
+        scheduler.step()
 
         # validate
         val_loss, val_acc = evaluate(model=model,
