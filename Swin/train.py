@@ -10,6 +10,7 @@ from torchvision import transforms
 
 from utils import read_split_data, MyDataSet, train_one_epoch, evaluate
 from Swin_model import swin_tiny_patch4_window7_224 as create_model
+from Swin_model import swin_base_patch4_window7_224_in22k as create_model_22k
 
 
 def main(args):
@@ -61,7 +62,7 @@ def main(args):
                                              shuffle=True,
                                              num_workers=1)
 
-    model = create_model(num_classes=args.num_classes).to(device)
+    model = create_model_22k(num_classes=args.num_classes).to(device)
 
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: {} not found".format(args.weights)
@@ -123,11 +124,11 @@ if __name__ == '__main__':
                         default="../datasets/flower_photos")
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default='./weights/swin_tiny_patch4_window7_224.pth',
+    parser.add_argument('--weights', type=str, default='./weights/swin_base_patch4_window7_224_22k.pth.pth',
                         help='initial weights path')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
-    parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
+    parser.add_argument('--device', default='cuda:3', help='device id (i.e. 0 or 0,1 or cpu)')
 
     opt = parser.parse_args()
 
