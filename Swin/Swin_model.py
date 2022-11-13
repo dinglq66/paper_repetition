@@ -507,6 +507,7 @@ def swin_tiny_patch4_window7_224(num_classes: int = 1000, **kwargs):
                             **kwargs)
     return model
 
+
 def swin_base_patch4_window7_224_in22k(num_classes: int = 21841, **kwargs):
     model = SwinTransformer(in_chans=3,
                             patch_size=4,

@@ -11,6 +11,7 @@ from torchvision import transforms
 from utils import read_split_data, MyDataSet, train_one_epoch, evaluate
 from Swin_model import swin_tiny_patch4_window7_224 as create_model
 from Swin_model import swin_base_patch4_window7_224_in22k as create_model_22k
+from MyModel.model import ISODformer
 
 
 def main(args):
@@ -62,7 +63,9 @@ def main(args):
                                              shuffle=True,
                                              num_workers=1)
 
-    model = create_model_22k(num_classes=args.num_classes).to(device)
+    # model = create_model_22k(num_classes=args.num_classes).to(device)
+    model = ISODformer(mode='non-local', patch_size=4, in_c=3,
+                       embed_dim=96, depths=(3, 3, 4), num_heads=(3, 6, 12))
 
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: {} not found".format(args.weights)
@@ -98,9 +101,9 @@ def main(args):
 
         # validate
         val_loss, val_acc = evaluate(model=model,
-                                      data_loader=val_loader,
-                                      device=device,
-                                      epoch=epoch)
+                                     data_loader=val_loader,
+                                     device=device,
+                                     epoch=epoch)
 
         tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
         tb_writer.add_scalar(tags[0], train_loss, epoch)
