@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import List, Callable
 
 
 def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
@@ -32,7 +33,7 @@ class InvertedResidual(nn.Module):
 
         if self.stride == 2:
             self.branch1 = nn.Sequential(
-                self.depthwise_conv(input_c, output_c, kernel_s=3, stride=self.stride, padding=1),
+                self.depthwise_conv(input_c, input_c, kernel_s=3, stride=self.stride, padding=1),
                 nn.BatchNorm2d(input_c),
                 nn.Conv2d(in_channels=input_c, out_channels=branch_features, kernel_size=(1, 1), bias=False),
                 nn.BatchNorm2d(branch_features),
@@ -61,3 +62,103 @@ class InvertedResidual(nn.Module):
                        bias: bool = False) -> nn.Conv2d:
         return nn.Conv2d(in_channels=input_c, out_channels=output_c, kernel_size=(kernel_s, kernel_s),
                          stride=(stride, stride), padding=padding, bias=bias, groups=input_c)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.stride == 1:
+            x1, x2 = x.chunk(2, dim=1)
+            out = torch.cat((x1, self.branch2(x2)), dim=1)
+        else:
+            # stride为2的情况下不再进行channel split，因为两个分支就已经实现了维度的减半
+            out = torch.cat((self.branch1(x), self.branch2(x)), dim=1)
+
+        out = channel_shuffle(out, groups=2)
+
+        return out
+
+
+class ShuffleNetV2(nn.Module):
+    def __init__(self,
+                 stages_repeats: List[int],
+                 stages_out_channels: List[int],
+                 num_classes: int = 1000,
+                 inverted_residual: Callable[..., nn.Module] = InvertedResidual):
+        super(ShuffleNetV2, self).__init__()
+
+        if len(stages_repeats) != 3:
+            raise ValueError("expected stages_repeats as list of 3 positive ints")
+        if len(stages_out_channels) != 5:
+            raise ValueError("expected stages_out_channels as list of 5 positive ints")
+        self._stage_out_channels = stages_out_channels
+
+        # input RGB images
+        input_channels = 3
+        output_channels = self._stage_out_channels[0]
+
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(input_channels, output_channels, kernel_size=(3, 3), stride=(2, 2),
+                      padding=(1, 1), bias=False),
+            nn.BatchNorm2d(output_channels),
+            nn.ReLU(inplace=True)
+        )
+        input_channels = output_channels
+
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        # Static annotations for mypy
+        self.stage2: nn.Sequential
+        self.stage3: nn.Sequential
+        self.stage4: nn.Sequential
+
+        stage_names = ["stage{}".format(i) for i in [2, 3, 4]]
+        for name, repeats, output_channels in zip(stage_names, stages_repeats, self._stage_out_channels[1:]):
+            # Stage中的第一个模块stride为2
+            seq = [inverted_residual(input_channels, output_channels, 2)]
+            for i in range(repeats - 1):
+                seq.append(inverted_residual(output_channels, output_channels, 1))
+            setattr(self, name, nn.Sequential(*seq))
+            input_channels = output_channels
+
+        # 搭建Conv5层
+        output_channels = self._stage_out_channels[-1]
+        self.conv5 = nn.Sequential(
+            nn.Conv2d(input_channels, output_channels, kernel_size=(1, 1), stride=(1, 1),
+                      padding=(0, 0), bias=False),
+            nn.BatchNorm2d(output_channels),
+            nn.ReLU(inplace=True)
+        )
+
+        self.fc = nn.Linear(output_channels, num_classes)
+
+    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.maxpool(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.stage4(x)
+        x = self.conv5(x)
+        x = x.mean([2, 3])
+        x = self.fc(x)
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._forward_impl(x)
+
+
+def shufflenet_v2_x1_0(num_classes=1000):
+    model = ShuffleNetV2(stages_repeats=[4, 8, 4],
+                         stages_out_channels=[24, 116, 232, 464, 1024],
+                         num_classes=num_classes)
+    return model
+
+
+def shufflenet_v2_x0_5(num_classes=1000):
+    model = ShuffleNetV2(stages_repeats=[4, 8, 4],
+                         stages_out_channels=[24, 48, 96, 192, 1024],
+                         num_classes=num_classes)
+    return model
+
+
+if __name__ == '__main__':
+    model = shufflenet_v2_x1_0(num_classes=1000)
+    test_tensor = torch.ones((1, 3, 224, 224))
+    print(model(test_tensor).shape)
