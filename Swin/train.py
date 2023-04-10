@@ -11,7 +11,7 @@ from torchvision import transforms
 from utils import read_split_data, MyDataSet, train_one_epoch, evaluate
 from Swin_model import swin_tiny_patch4_window7_224 as create_model
 from Swin_model import swin_base_patch4_window7_224_in22k as create_model_22k
-from MyModel.model import ISODformer
+from model import ISODformer, DATISOD
 
 
 def main(args):
@@ -64,8 +64,10 @@ def main(args):
                                              num_workers=1)
 
     # model = create_model_22k(num_classes=args.num_classes).to(device)
-    model = ISODformer(mode='non-local', patch_size=4, in_c=3,
+    model = ISODformer(mode='non-local', img_size=224, patch_size=4, in_c=3,
                        embed_dim=96, depths=(3, 3, 4), num_heads=(3, 6, 12))
+    # model = DATISOD()
+    model.to(device)
 
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: {} not found".format(args.weights)
@@ -112,7 +114,8 @@ def main(args):
         tb_writer.add_scalar(tags[3], val_acc, epoch)
         tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
 
-        torch.save(model.state_dict(), "./weights/model-{}.pth".format(epoch))
+        if (epoch+1) % 10 == 0:
+            torch.save(model.state_dict(), "./weights/model-{}.pth".format(epoch))
 
 
 if __name__ == '__main__':
@@ -127,7 +130,7 @@ if __name__ == '__main__':
                         default="../datasets/flower_photos")
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default='./weights/swin_base_patch4_window7_224_22k.pth.pth',
+    parser.add_argument('--weights', type=str, default='',
                         help='initial weights path')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=False)

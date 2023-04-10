@@ -7,6 +7,7 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 
 from Swin_model import swin_tiny_patch4_window7_224 as create_model
+from model import ISODformer
 
 
 def main():
@@ -37,9 +38,12 @@ def main():
     class_indict = json.load(json_file)
 
     # create model
-    model = create_model(num_classes=5).to(device)
+    # model = create_model(num_classes=5).to(device)
+    model = ISODformer(mode='non-local', patch_size=4, in_c=3,
+                       embed_dim=96, depths=(3, 3, 4), num_heads=(3, 6, 12))
+    model.to(device)
     # load model weights
-    model_weight_path = "./weights/model-19.pth"
+    model_weight_path = "./weights/model-29.pth"
     model.load_state_dict(torch.load(model_weight_path, map_location=device))
     model.eval()
     with torch.no_grad():

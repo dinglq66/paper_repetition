@@ -11,7 +11,7 @@ from vit_model import vit_base_patch16_224_in21k as create_model
 
 
 def main():
-    device = torch.device("cuda: 0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     data_transform = transforms.Compose(
         [transforms.Resize(256),
@@ -21,7 +21,7 @@ def main():
     )
 
     # 加载测试图片
-    img_path = "./test.jpg"
+    img_path = "./tulips_test.jpg"
     assert os.path.exists(img_path), "file: '{}' does not exist.".format(img_path)
     img = Image.open(img_path)
     plt.imshow(img)
